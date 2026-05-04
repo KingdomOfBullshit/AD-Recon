@@ -45,3 +45,9 @@ Then load `scan_results.json` from the dashboard UI.
 
 - Keep your clone private — output JSON will contain credential context and internal hostnames
 - Tested on Python 3.10/3.13, Windows and Linux
+
+
+## Changelog
+- Fixed false positives in Kerberoasting
+- ADCS ESC1/ESC8
+- Unconstrained delegation detection
