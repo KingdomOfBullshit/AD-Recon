@@ -220,8 +220,11 @@ tr.row-admin:hover td{background:rgba(232,93,117,.05);}
   <div id="main">
     <div id="topbar">
       <div class="tb-title" id="tbTitle">AD Scan Dashboard</div>
+      <input type="text" id="globalSearch" placeholder="🔍 Search everything..." oninput="globalSearchFn()"
+        style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;width:220px;">
       <div class="tb-gap"></div>
       <div class="tb-badge" id="smbBadge" style="display:none"></div>
+      <button class="tb-btn" id="refreshBtn" onclick="refreshData()" style="display:none">↺ Refresh</button>
       <button class="tb-btn" onclick="document.getElementById('fi').click()">⊕ Load JSON</button>
     </div>
     <div id="content">
@@ -349,6 +352,11 @@ tr.row-admin:hover td{background:rgba(232,93,117,.05);}
       <!-- ADCS -->
       <div class="page" id="page-adcs"><div id="adcsContent"></div></div>
 
+      <!-- Global Search Results -->
+      <div class="page" id="page-search">
+        <div id="searchResults"></div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -358,21 +366,111 @@ tr.row-admin:hover td{background:rgba(232,93,117,.05);}
 <script>
 let D = null;
 let allUsers = [];
+let lastFile = null;
 let svcSort = { smb:{field:'local_admin',adminFirst:true}, winrm:{field:'local_admin',adminFirst:true}, mssql:{field:'sysadmin',adminFirst:true} };
 let expandedRows = {};
 
 // ── Load ─────────────────────────────────────────────────────────────────────
 function handleFile(e) {
   const f = e.target.files[0]; if (!f) return;
+  lastFile = f;
+  loadFromFile(f);
+}
+
+function loadFromFile(f) {
   const r = new FileReader();
   r.onload = ev => {
     try {
       D = JSON.parse(ev.target.result);
       document.getElementById('load-screen').style.display = 'none';
+      document.getElementById('refreshBtn').style.display = 'inline';
+      document.getElementById('globalSearch').style.display = 'inline';
       renderAll(); nav('overview');
     } catch(err) { alert('Bad JSON: ' + err.message); }
   };
   r.readAsText(f);
+}
+
+function refreshData() {
+  if (!lastFile) { document.getElementById('fi').click(); return; }
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '↺ Refreshing...';
+  loadFromFile(lastFile);
+  setTimeout(() => btn.textContent = '↺ Refresh', 800);
+}
+
+function globalSearchFn() {
+  const q = document.getElementById('globalSearch').value.toLowerCase().trim();
+  if (!q || !D) return;
+
+  // Search across users, computers, findings
+  const userHits = (D.users||[]).filter(u =>
+    (u.sam||'').toLowerCase().includes(q) ||
+    (u.display_name||'').toLowerCase().includes(q) ||
+    (u.description||'').toLowerCase().includes(q) ||
+    (u.spns||[]).some(s=>s.toLowerCase().includes(q))
+  );
+  const compHits = (D.computers||[]).filter(c =>
+    (c.hostname||'').toLowerCase().includes(q) ||
+    (c.ip||'').includes(q) ||
+    (c.os||'').toLowerCase().includes(q) ||
+    (c.shares_read||[]).some(s=>s.toLowerCase().includes(q))
+  );
+  const findingHits = (D.findings||[]).filter(f =>
+    (f.title||'').toLowerCase().includes(q) ||
+    (f.detail||'').toLowerCase().includes(q)
+  );
+
+  nav('search');
+
+  let html = `<div class="sh">Search results for "${esc(q)}" — ${userHits.length} users, ${compHits.length} hosts, ${findingHits.length} findings</div>`;
+
+  if (findingHits.length) {
+    html += '<div class="sh" style="margin-top:16px">Findings</div>';
+    html += findingHits.map((f,i) => `
+      <div class="finding">
+        <div class="fh" onclick="toggleF('s${i}')">
+          <span class="sev sev-${f.severity}">${f.severity}</span>
+          <span class="ft">${esc(f.title)}</span>
+          <span class="fd">${esc(f.detail||'')}</span>
+          <span class="chev" id="fc-s${i}">▼</span>
+        </div>
+        <div class="fbody" id="fb-s${i}">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:8px">${esc(f.detail||'')}</div>
+          ${f.command?`<div class="cmd"><pre>${esc(f.command)}</pre><button class="cpbtn" onclick="cp('${enc(f.command)}',this)">copy</button></div>`:''}
+        </div>
+      </div>`).join('');
+  }
+
+  if (compHits.length) {
+    html += '<div class="sh" style="margin-top:16px">Hosts</div>';
+    html += '<div class="svc-table-wrap"><table><thead><tr><th>Hostname</th><th>IP</th><th>OS</th><th>Shares</th><th>Admin</th></tr></thead><tbody>';
+    html += compHits.map(c => `<tr class="${c.local_admin?'row-admin':''}">
+      <td><strong>${esc(c.hostname)}</strong></td>
+      <td style="color:var(--blue);font-family:var(--mono)">${esc(c.ip||'—')}</td>
+      <td style="color:var(--text2)">${esc(c.os||'—')}</td>
+      <td><div class="share-list">${(c.shares_read||[]).map(s=>`<span class="share-pill sp-read">${esc(s)}</span>`).join('')}</div></td>
+      <td>${c.local_admin?'<span class="badge b-admin">LOCAL ADMIN</span>':'<span class="b-no">no</span>'}</td>
+    </tr>`).join('');
+    html += '</tbody></table></div>';
+  }
+
+  if (userHits.length) {
+    html += '<div class="sh" style="margin-top:16px">Users</div>';
+    html += '<div class="svc-table-wrap"><table><thead><tr><th>Username</th><th>Display Name</th><th>Flags</th><th>Description</th></tr></thead><tbody>';
+    const FC={'ACCOUNT_DISABLED':'flag-gray','PASSWD_NOTREQD':'flag-amber','DONT_REQUIRE_PREAUTH':'flag-red','TRUSTED_FOR_DELEGATION':'flag-red','PASSWORD_EXPIRED':'flag-amber','LOCKOUT':'flag-red'};
+    html += userHits.map(u => {
+      const flags=(u.flags||[]).map(f=>`<span class="flag ${FC[f]||'flag-gray'}">${f.replace(/_/g,' ')}</span>`).join('');
+      return `<tr><td><strong>${esc(u.sam)}</strong></td><td style="color:var(--text2)">${esc(u.display_name||'')}</td><td>${flags||'—'}</td><td style="color:var(--amber);font-size:11px">${esc(u.description||'')}</td></tr>`;
+    }).join('');
+    html += '</tbody></table></div>';
+  }
+
+  if (!findingHits.length && !compHits.length && !userHits.length) {
+    html += '<div class="no-data">No results found.</div>';
+  }
+
+  document.getElementById('searchResults').innerHTML = html;
 }
 
 function renderAll() {
