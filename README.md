@@ -58,5 +58,5 @@ Then load `scan_results.json` from the dashboard UI.
 - Fixed SMB signing status showing incorrectly in partial/crashed scan output
 
 ### Dashboard
-Added global search bar across users, hosts and findings
-Added Refresh button to reload JSON without page refresh
+- Added global search bar across users, hosts and findings
+- Added Refresh button to reload JSON without page refresh
