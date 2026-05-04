@@ -48,6 +48,15 @@ Then load `scan_results.json` from the dashboard UI.
 
 
 ## Changelog
+
+### Scanner
 - Fixed false positives in Kerberoasting
 - ADCS ESC1/ESC8
 - Unconstrained delegation detection
+- Threaded host scanning (default 10 threads, configurable with -t) — significantly faster on large environments
+- Added --skip-hosts flag to skip unreachable subnets/IPs (e.g. --skip-hosts 10.0.0.0/8,192.168.1.5)
+- Fixed SMB signing status showing incorrectly in partial/crashed scan output
+
+### Dashboard
+Added global search bar across users, hosts and findings
+Added Refresh button to reload JSON without page refresh
